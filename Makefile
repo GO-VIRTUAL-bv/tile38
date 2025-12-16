@@ -19,12 +19,12 @@ tile38-luamemtest:
 test: all
 	@./scripts/test.sh
 
+
 package:
 	@rm -rf packages/
 	@scripts/package.sh Windows windows amd64
 	@scripts/package.sh Mac     darwin  amd64
 	@scripts/package.sh Linux   linux   amd64
-	@scripts/package.sh FreeBSD freebsd amd64
 	@scripts/package.sh ARM     linux   arm
 	@scripts/package.sh ARM64   linux   arm64
 
@@ -43,3 +43,6 @@ uninstall:
 	rm -f /usr/local/bin/tile38-server
 	rm -f /usr/local/bin/tile38-cli
 	rm -f /usr/local/bin/tile38-benchmark
+
+docker: distclean test package
+	@./scripts/docker.sh

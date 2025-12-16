@@ -306,6 +306,7 @@ Developer Options:
 		cpuprofile  string
 		memprofile  string
 		pprofport   int
+		natsURL     string
 	)
 
 	flag.IntVar(&port, "p", 9851, "The listening port")
@@ -320,6 +321,7 @@ Developer Options:
 	flag.IntVar(&pprofport, "pprofport", 0, "pprofport http at port")
 	flag.StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile to `file`")
 	flag.StringVar(&memprofile, "memprofile", "", "write memory profile to `file`")
+	flag.StringVar(&natsURL, "nats-connection", "nc", "The NATS server connection URL")
 	flag.Parse()
 
 	if logEncoding == "json" {
@@ -506,6 +508,7 @@ Developer Options:
 		Shutdown:          shutdown,
 		Spinlock:          spinlock,
 		ClientOutput:      clientOutput,
+		NATSURL:           natsURL,
 	}
 	if err := server.Serve(opts); err != nil {
 		log.Fatal(err)

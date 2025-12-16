@@ -806,8 +806,7 @@ func (s *Server) cmdSET(msg *Message) (resp.Value, commandDetails, error) {
 	switch msg.OutputType {
 	default:
 	case JSON:
-		res = resp.StringValue(`{"ok":true,"elapsed":"` +
-			time.Since(start).String() + "\"}")
+		res = resp.StringValue(`{"ok":true,"elapsed":"` + time.Since(start).String() + "\"}")
 	case RESP:
 		res = resp.SimpleStringValue("OK")
 	}

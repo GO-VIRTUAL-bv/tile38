@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/redcon"
 	"github.com/tidwall/resp"
+	"github.com/tidwall/tile38/internal/field"
 	"github.com/tidwall/tile38/internal/log"
 )
 
@@ -200,8 +202,53 @@ func (s *Server) writeAOF(args []string, d *commandDetails) error {
 			s.lcond.Broadcast()
 		}
 		s.lcond.L.Unlock()
+
+		s.writeNATS(args, d)
 	}
 	return nil
+}
+
+func (s *Server) writeNATS(args []string, d *commandDetails) {
+
+	if len(args) == 0 {
+		return
+	}
+
+	cmd := strings.ToLower(args[0])
+	switch cmd {
+	case "sethook", "delhook":
+		// TODO: implement nats for hook create/delete
+	case "set", "fset", "del":
+		if d.obj == nil {
+			return
+		}
+
+		// Send notifications to nats
+		subj := fmt.Sprintf("t38.%s.%s.%s", d.key, d.obj.ID(), d.command)
+
+		var buf bytes.Buffer
+		buf.WriteString(`{"geometry":`)
+		buf.WriteString(string(d.obj.Geo().AppendJSON(nil)))
+		nfields := d.obj.Fields().Len()
+		if nfields > 0 {
+			buf.WriteString(`,"properties":{`)
+			var i int
+			d.obj.Fields().Scan(func(f field.Field) bool {
+				if i > 0 {
+					buf.WriteString(`,`)
+				}
+				buf.WriteString(jsonString(f.Name()) + ":" + f.Value().JSON())
+				i++
+				return true
+			})
+			buf.WriteString(`}`)
+		}
+		buf.WriteString("}")
+
+		if err := s.nc.Publish(subj, buf.Bytes()); err != nil {
+			log.Error(err)
+		}
+	}
 }
 
 func (s *Server) getQueueCandidates(d *commandDetails) []*Hook {

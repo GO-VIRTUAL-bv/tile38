@@ -6,7 +6,7 @@ cd $(dirname "${BASH_SOURCE[0]}")/..
 PLATFORM="$1"
 GOOS="$2"
 GOARCH="$3"
-VERSION=$(git describe --tags --abbrev=0)
+VERSION=$(git describe --tags --abbrev=0 --always)
 
 echo Packaging $PLATFORM Binary
 

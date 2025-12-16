@@ -33,7 +33,7 @@ require (
 	github.com/gomodule/redigo v1.9.2
 	github.com/iwpnd/sectr v0.1.2
 	github.com/mmcloughlin/geohash v0.10.0
-	github.com/nats-io/nats.go v1.44.0
+	github.com/nats-io/nats.go v1.47.0
 	github.com/peterh/liner v1.2.2
 	github.com/prometheus/client_golang v1.23.0
 	github.com/streadway/amqp v1.1.0

@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tidwall/btree"
 	"github.com/tidwall/buntdb"
@@ -199,6 +200,9 @@ type Server struct {
 	shrinking bool        // aof shrinking flag
 	shrinklog [][]string  // aof shrinking log
 
+	// nats
+	nc *nats.Conn
+
 	// database
 	qdb  *buntdb.DB // hook queue log
 	qidx uint64     // hook queue log last idx
@@ -246,6 +250,9 @@ type Options struct {
 	UnixSocketPath string // path for unix socket
 	ClientOutput   string // "" or "resp" or "json"
 
+	// NATS Options for NATS connection
+	NATSURL string
+
 	// DevMode puts application in to dev mode
 	DevMode bool
 
@@ -281,6 +288,10 @@ func Serve(opts Options) error {
 	}
 	if opts.ProtectedMode == "" {
 		opts.ProtectedMode = "no"
+	}
+
+	if opts.NATSURL == "" {
+		opts.NATSURL = nats.DefaultURL
 	}
 
 	log.Infof("Server started, Tile38 version %s, git %s", core.Version, core.GitSHA)
@@ -341,8 +352,14 @@ func Serve(opts Options) error {
 	if err := os.MkdirAll(opts.Dir, 0700); err != nil {
 		return err
 	}
+
 	var err error
 	s.config, err = loadConfig(filepath.Join(opts.Dir, "config"))
+	if err != nil {
+		return err
+	}
+
+	s.nc, err = nats.Connect(opts.NATSURL)
 	if err != nil {
 		return err
 	}
@@ -1248,6 +1265,7 @@ func (s *Server) handleInputCommand(client *Client, msg *Message) error {
 	case "monitor":
 		// No locking for monitor
 	}
+
 	res, d, err := func() (res resp.Value, d commandDetails, err error) {
 		if msg.Deadline != nil {
 			if write {
@@ -1274,6 +1292,7 @@ func (s *Server) handleInputCommand(client *Client, msg *Message) error {
 		}
 		return res, d, err
 	}()
+
 	if res.Type() == resp.Error {
 		return writeErr(res.String())
 	}
@@ -1291,6 +1310,7 @@ func (s *Server) handleInputCommand(client *Client, msg *Message) error {
 			log.Fatal(err)
 			return err
 		}
+
 	}
 	var resStr string
 	resStr, err = serializeOutput(res)

@@ -201,7 +201,7 @@ func (s *Server) cmdSetHook(msg *Message) (
 		}
 	}
 	// add hook to spatial index
-	if hook != nil && hook.Fence != nil && hook.Fence.obj != nil {
+	if hook.Fence != nil && hook.Fence.obj != nil {
 		rect := hook.Fence.obj.Rect()
 		s.hookTree.Insert(
 			[2]float64{rect.Min.X, rect.Min.Y},
