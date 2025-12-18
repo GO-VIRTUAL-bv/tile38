@@ -206,7 +206,7 @@ func (s *Server) goLive(
 				// safely lock the fence because we are outside the main loop
 				s.mu.RLock()
 				defer s.mu.RUnlock()
-				msgs = FenceMatch("", sw, fence, nil, details)
+				msgs = FenceMatch("", sw, fence, nil, time.Now(), details)
 			}()
 			for _, msg := range msgs {
 				if err := writeLiveMessage(conn, []byte(msg), true, connType, websocket); err != nil {

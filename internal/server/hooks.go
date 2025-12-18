@@ -132,6 +132,7 @@ func (s *Server) cmdSetHook(msg *Message) (
 		channel:   channel,
 		cond:      sync.NewCond(&sync.Mutex{}),
 		counter:   &s.statsTotalMsgsSent,
+		timestamp: time.Now(),
 	}
 	if expiresSet {
 		hook.expires =
@@ -488,6 +489,7 @@ type Hook struct {
 	expires    time.Time
 	counter    *atomic.Int64 // counter that grows when a message was sent
 	sig        int
+	timestamp  time.Time
 }
 
 // Expires returns when the hook expires. Required by the expire.Item interface.
@@ -504,6 +506,9 @@ func (h *Hook) Equals(hook *Hook) bool {
 		return false
 	}
 	if !h.expires.Equal(hook.expires) {
+		// preserve previous timestamp
+		hook.timestamp = h.timestamp
+
 		return false
 	}
 	for i, endpoint := range h.Endpoints {

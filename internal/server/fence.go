@@ -16,8 +16,8 @@ import (
 )
 
 // FenceMatch executes a fence match returns back json messages for fence detection.
-func FenceMatch(hookName string, sw *scanWriter, fence *liveFenceSwitches, metas []FenceMeta, details *commandDetails) []string {
-	msgs := fenceMatch(hookName, sw, fence, metas, details)
+func FenceMatch(hookName string, sw *scanWriter, fence *liveFenceSwitches, metas []FenceMeta, ts time.Time, details *commandDetails) []string {
+	msgs := fenceMatch(hookName, sw, fence, metas, ts, details)
 	if len(fence.accept) == 0 {
 		return msgs
 	}
@@ -73,7 +73,7 @@ func multiGlobMatch(globs []string, s string) bool {
 
 func fenceMatch(
 	hookName string, sw *scanWriter, fence *liveFenceSwitches,
-	metas []FenceMeta, details *commandDetails,
+	metas []FenceMeta, ts time.Time, details *commandDetails,
 ) []string {
 	if details.command == "drop" {
 		return []string{
@@ -132,6 +132,9 @@ func fenceMatch(
 			}
 			if match1 && match2 {
 				detect = "inside"
+				if ts.After(details.old.Timestamp()) {
+					detect = "enter"
+				}
 			} else if match1 && !match2 {
 				detect = "exit"
 			} else if !match1 && match2 {

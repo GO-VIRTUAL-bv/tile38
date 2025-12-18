@@ -2,6 +2,7 @@ package object
 
 import (
 	"encoding/binary"
+	"time"
 	"unsafe"
 
 	"github.com/tidwall/geojson"
@@ -23,7 +24,7 @@ const opoint = 1
 const ogeo = 2
 
 type Object struct {
-	head   string // tuple (kind,expires,id)
+	head   string // tuple (kind,expires,[timestamp],id)
 	fields field.List
 }
 
@@ -63,11 +64,25 @@ func varint(s string) (int64, int) {
 }
 
 func (o *Object) ID() string {
-	if o.head[1] == 0 {
-		return o.head[2:]
+	if len(o.head) < 2 {
+		return ""
 	}
 	_, n := varint(o.head[1:])
-	return o.head[1+n:]
+	pos := 1 + n
+	if pos >= len(o.head) {
+		return ""
+	}
+	// try new format: timestamp(varint) + id
+	// parse timestamp
+	_, tn := varint(o.head[pos:])
+	if tn > 0 {
+		pos2 := pos + tn
+		if pos2 < len(o.head) {
+			return o.head[pos2:]
+		}
+	}
+	// fallback to old format: id is the rest of the head
+	return o.head[pos:]
 }
 
 func (o *Object) Fields() field.List {
@@ -77,6 +92,31 @@ func (o *Object) Fields() field.List {
 func (o *Object) Expires() int64 {
 	ex, _ := varint(o.head[1:])
 	return ex
+}
+
+// Timestamp returns the optional timestamp stored in the head.
+// It returns 0 when no timestamp is present (old-format objects).
+func (o *Object) Timestamp() time.Time {
+	if len(o.head) < 2 {
+		return time.Time{}
+	}
+	_, n := varint(o.head[1:])
+	pos := 1 + n
+	if pos >= len(o.head) {
+		return time.Time{}
+	}
+	// try new format: timestamp(varint) + id
+	ts, tn := varint(o.head[pos:])
+	if tn == 0 {
+		return time.Time{}
+	}
+	pos2 := pos + tn
+	if pos2 >= len(o.head) {
+		return time.Time{}
+	}
+	// remainder is id; accept as new format
+	// timestamp is stored as nanoseconds
+	return time.Unix(0, ts)
 }
 
 func (o *Object) Rect() geometry.Rect {
@@ -125,11 +165,25 @@ func makeHead(kind byte, id string, expires int64) string {
 	if expires != 0 {
 		exn = binary.PutVarint(exb[:], expires)
 	}
-	n := 1 + exn + len(id)
+	// timestamp (optional)
+	var tsb [20]byte
+	tsn := binary.PutVarint(tsb[:], time.Now().UnixNano())
+	if tsn == 0 {
+		// preserve old layout when no timestamp: kind + expires + id
+		n := 1 + exn + len(id)
+		head := make([]byte, n)
+		head[0] = kind
+		copy(head[1:], exb[:exn])
+		copy(head[1+exn:], id)
+		return *(*string)(unsafe.Pointer(&head))
+	}
+	// with timestamp: encode timestamp + id (no length)
+	n := 1 + exn + tsn + len(id)
 	head := make([]byte, n)
 	head[0] = kind
 	copy(head[1:], exb[:exn])
-	copy(head[1+exn:], id)
+	copy(head[1+exn:], tsb[:tsn])
+	copy(head[1+exn+tsn:], id)
 	return *(*string)(unsafe.Pointer(&head))
 }
 
