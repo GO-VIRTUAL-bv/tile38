@@ -209,6 +209,7 @@ type Server struct {
 	hookCross    *rtree.RTree // hook spatial tree for "cross" geofences
 	hookTree     *rtree.RTree // hook spatial tree for all
 	hooksOut     *btree.BTree // hooks with "outside" detection -- [string]*Hook
+	hooksMulti   *btree.BTree // multi-fence hooks (GRID/COLL) -- [string]*Hook
 	groupHooks   *btree.BTree // hooks that are connected to objects
 	groupObjects *btree.BTree // objects that are connected to hooks
 	hookExpires  *btree.BTree // queue of all hooks marked for expiration
@@ -313,9 +314,10 @@ func Serve(opts Options) error {
 		fcond:     sync.NewCond(&sync.Mutex{}),
 		lives:     make(map[*liveBuffer]bool),
 		lcond:     sync.NewCond(&sync.Mutex{}),
-		hooks:     btree.NewNonConcurrent(byHookName),
-		hooksOut:  btree.NewNonConcurrent(byHookName),
-		hookCross: &rtree.RTree{},
+		hooks:      btree.NewNonConcurrent(byHookName),
+		hooksOut:   btree.NewNonConcurrent(byHookName),
+		hooksMulti: btree.NewNonConcurrent(byHookName),
+		hookCross:  &rtree.RTree{},
 		hookTree:  &rtree.RTree{},
 		aofconnM:  make(map[net.Conn]io.Closer),
 		started:   time.Now(),
