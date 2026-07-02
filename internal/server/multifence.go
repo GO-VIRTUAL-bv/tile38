@@ -301,6 +301,16 @@ func multiFenceMatch(hookName string, sw *scanWriter, fence *liveFenceSwitches,
 		msgs = append(msgs,
 			cellMessages(sw, fence, hookName, metas, details, res, detect, c)...)
 	}
+	// A single fence-level "outside" fires when the object was inside at least one
+	// cell/zone and is now outside every one of them. This is the collection/grid
+	// analogue of a single-fence "outside" and carries no per-cell id.
+	if len(oldCells) > 0 && len(newCells) == 0 &&
+		(fence.detect == nil || fence.detect["outside"]) {
+		group := groupForCell(sw.s, hookName, details.key, details.obj.ID(), "", "outside")
+		tail := res[1:]
+		msgs = append(msgs, appendCellField(makemsg(details.command, group, "outside",
+			hookName, metas, details.key, details.timestamp, tail), fence, cell{id: ""}))
+	}
 	return msgs
 }
 
@@ -342,10 +352,9 @@ func cellMessages(sw *scanWriter, fence *liveFenceSwitches, hookName string,
 				d = "inside"
 				continue
 			}
-			if d == "exit" {
-				d = "outside"
-				continue
-			}
+			// "exit" is not promoted to a per-cell "outside": a multi-fence
+			// "outside" means the object is outside *every* cell/zone, which is
+			// emitted once at the fence level by multiFenceMatch, not per cell.
 			return nil
 		}
 		break
@@ -359,19 +368,13 @@ func cellMessages(sw *scanWriter, fence *liveFenceSwitches, hookName string,
 		out = append(out, appendCellField(makemsg(details.command, group, d,
 			hookName, metas, details.key, details.timestamp, tail), fence, c))
 	}
-	switch d {
-	case "enter":
-		if fence.detect == nil || fence.detect["inside"] {
-			out = append(out, appendCellField(makemsg(details.command, group,
-				"inside", hookName, metas, details.key, details.timestamp, tail),
-				fence, c))
-		}
-	case "exit":
-		if fence.detect == nil || fence.detect["outside"] {
-			out = append(out, appendCellField(makemsg(details.command, group,
-				"outside", hookName, metas, details.key, details.timestamp, tail),
-				fence, c))
-		}
+	// enter carries an "inside" companion; exit has no per-cell "outside"
+	// companion — fence-level "outside" is emitted by multiFenceMatch only when
+	// the object is outside every cell/zone.
+	if d == "enter" && (fence.detect == nil || fence.detect["inside"]) {
+		out = append(out, appendCellField(makemsg(details.command, group,
+			"inside", hookName, metas, details.key, details.timestamp, tail),
+			fence, c))
 	}
 	return out
 }
@@ -401,12 +404,14 @@ func appendCellField(msg string, fence *liveFenceSwitches, c cell) string {
 		b = appendJSONString(b, "grid")
 		b = append(b, `,"system":`...)
 		b = appendJSONString(b, fence.multi.grid.name())
-		b = append(b, `,"id":`...)
-		b = appendJSONString(b, c.id)
 	} else {
 		b = appendJSONString(b, "collection")
 		b = append(b, `,"key":`...)
 		b = appendJSONString(b, fence.multi.key)
+	}
+	// A fence-level event (e.g. "outside" across the whole fence) has no single
+	// cell/zone id; real cell/zone ids are never empty.
+	if c.id != "" {
 		b = append(b, `,"id":`...)
 		b = appendJSONString(b, c.id)
 	}

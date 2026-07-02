@@ -19,9 +19,11 @@ func subTestMultiFence(g *testGroup) {
 	g.regSubTest("grid a5", multifence_grid_a5_test)
 	g.regSubTest("grid detect inside", multifence_grid_inside_test)
 	g.regSubTest("grid polygon coverage", multifence_grid_polygon_test)
+	g.regSubTest("grid outside suppressed", multifence_grid_outside_test)
 
 	// Collection fences (channel + hooksMulti path)
 	g.regSubTest("collection channel", multifence_coll_channel_test)
+	g.regSubTest("collection outside all", multifence_coll_outside_test)
 
 	// Validation
 	g.regSubTest("validation", multifence_validation_test)
@@ -338,6 +340,124 @@ func verifyCollMsgs(msgs []string) error {
 		if id := gjson.Get(msgs[i], "fence.id").String(); id != w.id {
 			return fmt.Errorf("msg %d: expected fence.id '%s', got '%s'", i, w.id, id)
 		}
+	}
+	return nil
+}
+
+// multifence_grid_outside_test verifies that moving between grid cells never
+// emits a per-cell "outside": the device is always inside some cell, so it is
+// never outside all cells. DETECT includes outside to prove it does not leak
+// between the exit of the old cell and the enter of the new one.
+func multifence_grid_outside_test(mc *mockServer) error {
+	rd, c, conn, err := openLiveFence(mc,
+		"WITHIN fleet FENCE DETECT enter,exit,outside GRID QUADKEY 12")
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	defer c.Close()
+
+	// enter cell A
+	if _, err := redis.String(c.Do("SET", "fleet", "truck1", "POINT", 33.5, -112.0)); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("detect", "enter",
+		"fence.system", "quadkey",
+		"fence.id", "023102202123"); err != nil {
+		return err
+	}
+	// move to cell B: exit A then enter B, with NO "outside" in between — the
+	// device is still inside a grid cell, so it is never outside all cells.
+	if _, err := redis.String(c.Do("SET", "fleet", "truck1", "POINT", 40.0, -74.0)); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("detect", "exit", "fence.id", "023102202123"); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("detect", "enter", "fence.id", "032010112330"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// multifence_coll_outside_test verifies that "outside" fires exactly once, at the
+// collection level (no fence.id), only when the device is outside *every* zone —
+// not when it merely leaves one overlapping zone while still inside another.
+func multifence_coll_outside_test(mc *mockServer) error {
+	sc, err := redis.Dial("tcp", fmt.Sprintf(":%d", mc.port))
+	if err != nil {
+		return err
+	}
+	defer sc.Close()
+	psc := redis.PubSubConn{Conn: sc}
+	if err := psc.Subscribe("mfchan_out"); err != nil {
+		return err
+	}
+	// wait for the subscription to become active
+	for subscribed := false; !subscribed; {
+		switch v := psc.ReceiveWithTimeout(2 * time.Second).(type) {
+		case redis.Subscription:
+			subscribed = v.Count > 0
+		case error:
+			return v
+		}
+	}
+
+	bc, err := redis.Dial("tcp", fmt.Sprintf(":%d", mc.port))
+	if err != nil {
+		return err
+	}
+	defer bc.Close()
+
+	// two overlapping zones (overlap in lat 33.5–34.0, lon -112.0…-111.0)
+	if _, err := do(bc, "SET zones zoneA BOUNDS 33.0 -112.0 34.0 -111.0"); err != nil {
+		return err
+	}
+	if _, err := do(bc, "SET zones zoneB BOUNDS 33.5 -112.0 34.5 -111.0"); err != nil {
+		return err
+	}
+	if _, err := do(bc, "SETCHAN mfchan_out INTERSECTS fleet FENCE DETECT outside COLL zones"); err != nil {
+		return err
+	}
+
+	// inside A∩B → no message; inside A only (left B) → no message (still inside
+	// the collection); outside both → exactly one collection-level "outside".
+	for _, mv := range []string{
+		"SET fleet truck POINT 33.7 -111.5",
+		"SET fleet truck POINT 33.2 -111.5",
+		"SET fleet truck POINT 30.0 -111.5",
+	} {
+		if _, err := do(bc, mv); err != nil {
+			return err
+		}
+	}
+
+	// collect every published message until the channel goes quiet
+	var msgs []string
+	for {
+		v := psc.ReceiveWithTimeout(500 * time.Millisecond)
+		if m, ok := v.(redis.Message); ok {
+			msgs = append(msgs, string(m.Data))
+			continue
+		}
+		break // timeout (or any non-message): done collecting
+	}
+
+	if len(msgs) != 1 {
+		return fmt.Errorf("expected exactly 1 message, got %d: %v", len(msgs), msgs)
+	}
+	m := msgs[0]
+	if d := gjson.Get(m, "detect").String(); d != "outside" {
+		return fmt.Errorf("expected detect 'outside', got '%s' (%s)", d, m)
+	}
+	if typ := gjson.Get(m, "fence.type").String(); typ != "collection" {
+		return fmt.Errorf("expected fence.type 'collection', got '%s' (%s)", typ, m)
+	}
+	if key := gjson.Get(m, "fence.key").String(); key != "zones" {
+		return fmt.Errorf("expected fence.key 'zones', got '%s' (%s)", key, m)
+	}
+	if gjson.Get(m, "fence.id").Exists() {
+		return fmt.Errorf("expected no fence.id on collection-level outside (%s)", m)
 	}
 	return nil
 }
