@@ -677,6 +677,12 @@ func (s *Server) parseSearchScanBaseTokens(
 				err = errInvalidNumberOfArguments
 				return
 			}
+		case "a5":
+			t.output = outputA5
+			if nvs, sprecision, ok = tokenval(nvs); !ok || sprecision == "" {
+				err = errInvalidNumberOfArguments
+				return
+			}
 		case "bounds":
 			t.output = outputBounds
 		case "ids":
@@ -694,9 +700,23 @@ func (s *Server) parseSearchScanBaseTokens(
 	}
 	if sprecision != "" {
 		t.precision, err = strconv.ParseUint(sprecision, 10, 64)
-		if err != nil || t.precision == 0 || t.precision > 12 {
+		if err != nil {
 			err = errInvalidArgument(sprecision)
 			return
+		}
+		switch t.output {
+		case outputA5:
+			// A5 resolutions range from 0 (whole-world faces) to 30.
+			if t.precision > a5MaxResolution {
+				err = errInvalidArgument(sprecision)
+				return
+			}
+		default:
+			// geohash precision ranges from 1 to 12.
+			if t.precision == 0 || t.precision > 12 {
+				err = errInvalidArgument(sprecision)
+				return
+			}
 		}
 	}
 	if slimit != "" {
