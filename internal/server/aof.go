@@ -214,6 +214,15 @@ func (s *Server) getQueueCandidates(d *commandDetails) []*Hook {
 		}
 		return true
 	})
+	// add the multi-fence hooks (GRID/COLL); their area is dynamic so they are
+	// always candidates for their watched key.
+	s.hooksMulti.Ascend(nil, func(v interface{}) bool {
+		hook := v.(*Hook)
+		if hook.Key == d.key {
+			candidates[hook] = true
+		}
+		return true
+	})
 	// look for candidates that might "cross" geofences
 	if d.old != nil && d.obj != nil && s.hookCross.Len() > 0 {
 		r1, r2 := d.old.Rect(), d.obj.Rect()

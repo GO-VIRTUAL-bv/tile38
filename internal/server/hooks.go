@@ -171,6 +171,7 @@ func (s *Server) cmdSetHook(msg *Message) (
 		prevHook.Close()
 		s.hooks.Delete(prevHook)
 		s.hooksOut.Delete(prevHook)
+		s.hooksMulti.Delete(prevHook)
 		if !prevHook.expires.IsZero() {
 			s.hookExpires.Delete(prevHook)
 		}
@@ -181,7 +182,12 @@ func (s *Server) cmdSetHook(msg *Message) (
 	d.timestamp = time.Now()
 
 	s.hooks.Set(hook)
-	if hook.Fence.detect == nil || hook.Fence.detect["outside"] {
+	if hook.Fence.multi != nil {
+		// multi-fence hooks have a dynamic area (a set of cells/zones), so they
+		// cannot live in the static spatial index. Instead they are always
+		// candidates for their watched key, evaluated per object change.
+		s.hooksMulti.Set(hook)
+	} else if hook.Fence.detect == nil || hook.Fence.detect["outside"] {
 		s.hooksOut.Set(hook)
 	}
 
@@ -248,6 +254,7 @@ func (s *Server) cmdDELHOOKop(name string, channel bool) (updated bool) {
 	// remove hook from maps
 	s.hooks.Delete(hook)
 	s.hooksOut.Delete(hook)
+	s.hooksMulti.Delete(hook)
 	if !hook.expires.IsZero() {
 		s.hookExpires.Delete(hook)
 	}

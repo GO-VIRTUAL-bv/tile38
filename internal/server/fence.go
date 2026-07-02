@@ -108,6 +108,9 @@ func fenceMatch(
 	var roamNearbys, roamFaraways []roamMatch
 	var detect = "outside"
 	if fence != nil {
+		if fence.multi != nil {
+			return multiFenceMatch(hookName, sw, fence, metas, details)
+		}
 		if fence.roam.on {
 			if details.command == "set" {
 				roamNearbys, roamFaraways =

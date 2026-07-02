@@ -24,9 +24,10 @@ const defaultCircleSteps = 64
 
 type liveFenceSwitches struct {
 	searchScanBaseTokens
-	obj  geojson.Object
-	cmd  string
-	roam roamSwitches
+	obj   geojson.Object
+	cmd   string
+	roam  roamSwitches
+	multi *multiSwitches // non-nil for multi-fence (GRID / COLL) hooks
 }
 
 type roamSwitches struct {
@@ -462,6 +463,69 @@ func (s *Server) cmdSearchArgs(
 			}
 			lfs.roam.scan = scan
 		}
+	case "grid":
+		if !lfs.fence {
+			err = errors.New("grid is only supported with fence")
+			return
+		}
+		if lfs.clip {
+			err = errInvalidArgument("cannot clip with grid")
+			return
+		}
+		if lfs.roam.on {
+			err = errInvalidArgument("cannot use grid with roam")
+			return
+		}
+		var system, slevel string
+		if vs, system, ok = tokenval(vs); !ok || system == "" {
+			err = errInvalidNumberOfArguments
+			return
+		}
+		if vs, slevel, ok = tokenval(vs); !ok || slevel == "" {
+			err = errInvalidNumberOfArguments
+			return
+		}
+		var level int
+		if level, err = strconv.Atoi(slevel); err != nil {
+			err = errInvalidArgument(slevel)
+			return
+		}
+		var gs gridSystem
+		if gs, err = newGridSystem(strings.ToLower(system), level); err != nil {
+			return
+		}
+		lfs.obj = nil
+		lfs.multi = &multiSwitches{
+			kind:   "grid",
+			grid:   gs,
+			tokens: []string{"GRID", strings.ToUpper(system), slevel},
+		}
+	case "coll":
+		if !lfs.fence {
+			err = errors.New("coll is only supported with fence")
+			return
+		}
+		if lfs.clip {
+			err = errInvalidArgument("cannot clip with coll")
+			return
+		}
+		if lfs.roam.on {
+			err = errInvalidArgument("cannot use coll with roam")
+			return
+		}
+		var key string
+		if vs, key, ok = tokenval(vs); !ok || key == "" {
+			err = errInvalidNumberOfArguments
+			return
+		}
+		// The collection is resolved dynamically at match time, so an empty or
+		// missing collection at creation time is not an error.
+		lfs.obj = nil
+		lfs.multi = &multiSwitches{
+			kind:   "collection",
+			key:    key,
+			tokens: []string{"COLL", key},
+		}
 	}
 
 	var clipRect geojson.Object
@@ -514,7 +578,7 @@ var nearbyTypes = map[string]bool{
 var withinOrIntersectsTypes = map[string]bool{
 	"geo": true, "bounds": true, "hash": true, "tile": true, "quadkey": true,
 	"get": true, "object": true, "circle": true, "point": true, "sector": true,
-	"mvt": true, "a5": true,
+	"mvt": true, "a5": true, "grid": true, "coll": true,
 }
 
 func (s *Server) cmdNearby(msg *Message) (res resp.Value, err error) {

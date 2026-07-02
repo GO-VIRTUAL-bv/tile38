@@ -51,6 +51,7 @@ func TestIntegration(t *testing.T) {
 	regTestGroup("client", subTestClient)
 	regTestGroup("scripts", subTestScripts)
 	regTestGroup("fence", subTestFence)
+	regTestGroup("multifence", subTestMultiFence)
 	regTestGroup("info", subTestInfo)
 	regTestGroup("timeouts", subTestTimeout)
 	regTestGroup("metrics", subTestMetrics)
