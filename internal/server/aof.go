@@ -214,6 +214,15 @@ func (s *Server) getQueueCandidates(d *commandDetails) []*Hook {
 		}
 		return true
 	})
+	// add the hooks with a live GET boundary. Their boundary is dynamic, so
+	// they are not in the spatial index and must always be considered.
+	s.hooksLive.Ascend(nil, func(v interface{}) bool {
+		hook := v.(*Hook)
+		if hook.Key == d.key {
+			candidates[hook] = true
+		}
+		return true
+	})
 	// look for candidates that might "cross" geofences
 	if d.old != nil && d.obj != nil && s.hookCross.Len() > 0 {
 		r1, r2 := d.old.Rect(), d.obj.Rect()

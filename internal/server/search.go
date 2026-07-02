@@ -27,6 +27,13 @@ type liveFenceSwitches struct {
 	obj  geojson.Object
 	cmd  string
 	roam roamSwitches
+	get  getSwitches
+}
+
+type getSwitches struct {
+	on  bool
+	key string
+	id  string
 }
 
 type roamSwitches struct {
@@ -411,6 +418,13 @@ func (s *Server) cmdSearchArgs(
 			return
 		}
 		lfs.obj = o.Geo()
+		// optional LIVE modifier: resolve the referenced object at match
+		// time instead of using this static snapshot (only meaningful for
+		// hooks/channels; a one-shot search is unaffected).
+		if nvs, tok, okLive := tokenval(vs); okLive && strings.ToLower(tok) == "live" {
+			vs = nvs
+			lfs.get = getSwitches{on: true, key: key, id: id}
+		}
 	case "roam":
 		lfs.roam.on = true
 		if vs, lfs.roam.key, ok = tokenval(vs); !ok || lfs.roam.key == "" {

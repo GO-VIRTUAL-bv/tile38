@@ -171,6 +171,7 @@ func (s *Server) cmdSetHook(msg *Message) (
 		prevHook.Close()
 		s.hooks.Delete(prevHook)
 		s.hooksOut.Delete(prevHook)
+		s.hooksLive.Delete(prevHook)
 		if !prevHook.expires.IsZero() {
 			s.hookExpires.Delete(prevHook)
 		}
@@ -181,12 +182,18 @@ func (s *Server) cmdSetHook(msg *Message) (
 	d.timestamp = time.Now()
 
 	s.hooks.Set(hook)
-	if hook.Fence.detect == nil || hook.Fence.detect["outside"] {
+	if hook.Fence.get.on {
+		// live GET hooks have a dynamic boundary, so they cannot be placed
+		// in the static spatial index. Instead they are always considered
+		// candidates for their watched key (mirrors the roam approach).
+		s.hooksLive.Set(hook)
+	} else if hook.Fence.detect == nil || hook.Fence.detect["outside"] {
 		s.hooksOut.Set(hook)
 	}
 
 	// remove previous hook from spatial index
-	if prevHook != nil && prevHook.Fence != nil && prevHook.Fence.obj != nil {
+	if prevHook != nil && prevHook.Fence != nil && prevHook.Fence.obj != nil &&
+		!prevHook.Fence.get.on {
 		rect := prevHook.Fence.obj.Rect()
 		s.hookTree.Delete(
 			[2]float64{rect.Min.X, rect.Min.Y},
@@ -200,7 +207,8 @@ func (s *Server) cmdSetHook(msg *Message) (
 		}
 	}
 	// add hook to spatial index
-	if hook != nil && hook.Fence != nil && hook.Fence.obj != nil {
+	if hook != nil && hook.Fence != nil && hook.Fence.obj != nil &&
+		!hook.Fence.get.on {
 		rect := hook.Fence.obj.Rect()
 		s.hookTree.Insert(
 			[2]float64{rect.Min.X, rect.Min.Y},
@@ -248,13 +256,14 @@ func (s *Server) cmdDELHOOKop(name string, channel bool) (updated bool) {
 	// remove hook from maps
 	s.hooks.Delete(hook)
 	s.hooksOut.Delete(hook)
+	s.hooksLive.Delete(hook)
 	if !hook.expires.IsZero() {
 		s.hookExpires.Delete(hook)
 	}
 	// remove any hook / object connections
 	s.groupDisconnectHook(hook.Name)
 	// remove hook from spatial index
-	if hook.Fence != nil && hook.Fence.obj != nil {
+	if hook.Fence != nil && hook.Fence.obj != nil && !hook.Fence.get.on {
 		rect := hook.Fence.obj.Rect()
 		s.hookTree.Delete(
 			[2]float64{rect.Min.X, rect.Min.Y},

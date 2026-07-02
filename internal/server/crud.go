@@ -597,6 +597,7 @@ func (s *Server) cmdFLUSHDB(msg *Message) (resp.Value, commandDetails, error) {
 	s.hookExpires.Clear()
 	s.hooks.Clear()
 	s.hooksOut.Clear()
+	s.hooksLive.Clear()
 	s.hookTree.Clear()
 	s.hookCross.Clear()
 
