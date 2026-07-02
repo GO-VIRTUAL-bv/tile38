@@ -29,7 +29,8 @@ jobs:
 
       - name: Docker push
         env:
-          DOCKER_LOGIN: tidwall
-          DOCKER_USER: tile38
+          DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+          DOCKER_LOGIN: ${{ vars.DOCKER_LOGIN || 'tidwall' }}
+          DOCKER_USER: ${{ vars.DOCKER_USER || 'tile38' }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: ./scripts/docker-push.sh
