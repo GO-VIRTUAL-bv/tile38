@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gomodule/redigo/redis"
+	"github.com/tidwall/gjson"
 
 	_ "embed"
 )
@@ -25,6 +26,82 @@ func subTestAOF(g *testGroup) {
 	g.regSubTest("AOFMD5", aof_AOFMD5_test)
 	g.regSubTest("AOFSHRINK", aof_AOFSHRINK_test)
 	g.regSubTest("READONLY", aof_READONLY_test)
+	g.regSubTest("get live reload", aof_get_live_reload_test)
+}
+
+// aof_get_live_reload_test verifies that a channel using `GET key id LIVE`
+// survives an AOF reload and still resolves its boundary at match time using
+// the reloaded (moved) boundary object. See issue #813.
+func aof_get_live_reload_test(mc *mockServer) error {
+	// Use BOUNDS (no quotes) so the inline AOF tokenizer is happy. Box A and
+	// box B are disjoint. minlat minlon maxlat maxlon.
+	boundsA := "SET zones zone1 BOUNDS 33.4 -112.2 33.6 -112.0"
+	boundsB := "SET zones zone1 BOUNDS 33.4 -110.2 33.6 -110.0"
+
+	// AOF: create the boundary, the live channel, then move the boundary to B.
+	aof := boundsA + "\r\n" +
+		"SETCHAN mychan WITHIN fleet FENCE DETECT inside,outside GET zones zone1 LIVE\r\n" +
+		boundsB + "\r\n"
+
+	rmc, err := loadAOF(aof)
+	if err != nil {
+		return err
+	}
+	defer rmc.Close()
+
+	// Confirm the channel was reloaded.
+	if _, err := rmc.Do("CHANS", "*"); err != nil {
+		return err
+	}
+
+	finalErr := make(chan error, 1)
+	var ready atomic.Bool
+	go func() {
+		sc, err := redis.Dial("tcp", fmt.Sprintf(":%d", rmc.port))
+		if err != nil {
+			finalErr <- err
+			return
+		}
+		defer sc.Close()
+		psc := redis.PubSubConn{Conn: sc}
+		if err := psc.PSubscribe("*"); err != nil {
+			finalErr <- err
+			return
+		}
+		for sc.Err() == nil {
+			switch v := psc.Receive().(type) {
+			case redis.Message:
+				if v.Channel == "status" && string(v.Data) == "ready" {
+					ready.Store(true)
+					continue
+				}
+				if v.Channel != "mychan" {
+					continue
+				}
+				// A truck inside B must match the reloaded boundary (B), proving
+				// the live GET reference was preserved across reload.
+				if d := gjson.Get(string(v.Data), "detect").String(); d != "inside" {
+					finalErr <- fmt.Errorf("expected detect 'inside', got '%s'", d)
+					return
+				}
+				finalErr <- nil
+				return
+			case error:
+				finalErr <- v
+				return
+			}
+		}
+	}()
+
+	for !ready.Load() {
+		if _, err := rmc.Do("PUBLISH", "status", "ready"); err != nil {
+			return err
+		}
+	}
+	if _, err := rmc.Do("SET", "fleet", "truck1", "POINT", "33.5", "-110.1"); err != nil {
+		return err
+	}
+	return <-finalErr
 }
 
 func loadAOFAndClose(aof any) error {

@@ -123,12 +123,24 @@ func fenceMatch(
 		} else {
 			var nocross bool
 			// not using roaming
-			match1 := fenceMatchObject(fence, details.old)
+			// Resolve the boundary geometry. For a live GET fence this is
+			// looked up at match time so the boundary follows the referenced
+			// object; otherwise it is the static geometry captured at creation.
+			fobj := fence.obj
+			if fence.get.on {
+				fobj = nil
+				if col, _ := sw.s.cols.Get(fence.get.key); col != nil {
+					if o := col.Get(fence.get.id); o != nil {
+						fobj = o.Geo()
+					}
+				}
+			}
+			match1 := fenceMatchObject(fence, details.old, fobj)
 			if match1 {
 				match1, _, _ = sw.testObject(details.old)
 				nocross = !match1
 			}
-			match2 := fenceMatchObject(fence, details.obj)
+			match2 := fenceMatchObject(fence, details.obj, fobj)
 			if match2 {
 				match2, _, _ = sw.testObject(details.obj)
 				nocross = !match2
@@ -166,7 +178,7 @@ func fenceMatch(
 							temp = true
 						}
 						lso := object.New("", ls, 0, field.List{})
-						if fenceMatchObject(fence, lso) {
+						if fenceMatchObject(fence, lso, fobj) {
 							detect = "cross"
 						}
 						if temp {
@@ -353,8 +365,8 @@ func makemsg(
 	return string(buf)
 }
 
-func fenceMatchObject(fence *liveFenceSwitches, o *object.Object) bool {
-	if o == nil {
+func fenceMatchObject(fence *liveFenceSwitches, o *object.Object, fobj geojson.Object) bool {
+	if o == nil || fobj == nil {
 		return false
 	}
 	if fence.roam.on {
@@ -364,11 +376,11 @@ func fenceMatchObject(fence *liveFenceSwitches, o *object.Object) bool {
 	switch fence.cmd {
 	case "nearby":
 		// nearby is an INTERSECT on a Circle
-		return o.Geo().Intersects(fence.obj)
+		return o.Geo().Intersects(fobj)
 	case "within":
-		return o.Geo().Within(fence.obj)
+		return o.Geo().Within(fobj)
 	case "intersects":
-		return o.Geo().Intersects(fence.obj)
+		return o.Geo().Intersects(fobj)
 	}
 	return false
 }

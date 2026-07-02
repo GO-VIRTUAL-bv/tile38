@@ -33,8 +33,202 @@ func subTestFence(g *testGroup) {
 	// channel meta
 	g.regSubTest("channel meta", fence_channel_meta_test)
 
+	// live GET boundary (issue #813)
+	g.regSubTest("get live", fence_get_live_test)
+	g.regSubTest("get live channel", fence_get_live_channel_test)
+
 	// various
 	g.regSubTest("detect eecio", fence_eecio_test)
+}
+
+// polygons used by the "get live" tests. A and B are disjoint boxes.
+const fenceGetLivePolyA = `{"type":"Polygon","coordinates":[[[-112.2,33.4],[-112.0,33.4],[-112.0,33.6],[-112.2,33.6],[-112.2,33.4]]]}`
+const fenceGetLivePolyB = `{"type":"Polygon","coordinates":[[[-110.2,33.4],[-110.0,33.4],[-110.0,33.6],[-110.2,33.6],[-110.2,33.4]]]}`
+
+// fence_get_live_test verifies that a live geofence using `GET key id LIVE`
+// resolves the boundary object at match time, so the boundary follows the
+// referenced object when it moves.
+func fence_get_live_test(mc *mockServer) error {
+	// Set up the boundary object BEFORE the fence references it via GET.
+	c, err := redis.Dial("tcp", fmt.Sprintf(":%d", mc.port))
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if _, err := redis.String(c.Do("SET", "zones", "zone1", "OBJECT",
+		fenceGetLivePolyA)); err != nil {
+		return err
+	}
+
+	// Open a live geofence whose boundary is resolved at match time.
+	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", mc.port))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := fmt.Fprintf(conn,
+		"WITHIN fleet FENCE DETECT inside,outside GET zones zone1 LIVE\r\n"); err != nil {
+		return err
+	}
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return err
+	}
+	if res := string(buf[:n]); res != "+OK\r\n" {
+		return fmt.Errorf("expected OK, got '%v'", res)
+	}
+	rd := &fenceReader{conn, bufio.NewReader(conn)}
+
+	// truck inside polygon A -> inside
+	if _, err := redis.String(c.Do("SET", "fleet", "truck1", "POINT",
+		"33.5", "-112.1")); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("command", "set",
+		"detect", "inside",
+		"key", "fleet",
+		"id", "truck1",
+		"object.coordinates", "[-112.1,33.5]"); err != nil {
+		return err
+	}
+
+	// Move the boundary to polygon B (disjoint). This writes to "zones", not
+	// the watched "fleet" key, so it must not itself produce a fence message.
+	if _, err := redis.String(c.Do("SET", "zones", "zone1", "OBJECT",
+		fenceGetLivePolyB)); err != nil {
+		return err
+	}
+
+	// truck now inside polygon B -> inside, proving the boundary was resolved
+	// at match time (a static GET snapshot of A would report "outside" here).
+	if _, err := redis.String(c.Do("SET", "fleet", "truck1", "POINT",
+		"33.5", "-110.1")); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("command", "set",
+		"detect", "inside",
+		"key", "fleet",
+		"id", "truck1",
+		"object.coordinates", "[-110.1,33.5]"); err != nil {
+		return err
+	}
+
+	// truck back at the old location -> now outside (the boundary followed to B)
+	if _, err := redis.String(c.Do("SET", "fleet", "truck1", "POINT",
+		"33.5", "-112.1")); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("command", "set",
+		"detect", "outside",
+		"key", "fleet",
+		"id", "truck1",
+		"object.coordinates", "[-112.1,33.5]"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// fence_get_live_channel_test verifies the same behavior through a persisted
+// channel (SETCHAN), which exercises the always-candidate hooksLive path.
+func fence_get_live_channel_test(mc *mockServer) error {
+	finalErr := make(chan error, 1)
+	var ready atomic.Bool
+
+	go func() {
+		sc, err := redis.Dial("tcp", fmt.Sprintf(":%d", mc.port))
+		if err != nil {
+			finalErr <- err
+			return
+		}
+		defer sc.Close()
+		psc := redis.PubSubConn{Conn: sc}
+		if err := psc.PSubscribe("*"); err != nil {
+			finalErr <- err
+			return
+		}
+		want := []struct{ detect, coords string }{
+			{"inside", "[-112.1,33.5]"},
+			{"inside", "[-110.1,33.5]"},
+			{"outside", "[-112.1,33.5]"},
+		}
+		var msgs []string
+		for sc.Err() == nil {
+			switch v := psc.Receive().(type) {
+			case redis.Message:
+				if v.Channel == "status" && string(v.Data) == "ready" {
+					ready.Store(true)
+					continue
+				}
+				if v.Channel != "getlivechan" {
+					continue
+				}
+				msgs = append(msgs, string(v.Data))
+				if len(msgs) < len(want) {
+					continue
+				}
+				for i, w := range want {
+					if d := gjson.Get(msgs[i], "detect").String(); d != w.detect {
+						finalErr <- fmt.Errorf("msg %d: expected detect '%s', got '%s'",
+							i, w.detect, d)
+						return
+					}
+					if c := gjson.Get(msgs[i], "object.coordinates").String(); c != w.coords {
+						finalErr <- fmt.Errorf("msg %d: expected coords '%s', got '%s'",
+							i, w.coords, c)
+						return
+					}
+				}
+				finalErr <- nil
+				return
+			case error:
+				finalErr <- v
+				return
+			}
+		}
+	}()
+
+	bc, err := redis.Dial("tcp", fmt.Sprintf(":%d", mc.port))
+	if err != nil {
+		return err
+	}
+	defer bc.Close()
+
+	// The boundary object must exist before the channel references it via GET.
+	if _, err := bc.Do("SET", "zones", "zone1", "OBJECT", fenceGetLivePolyA); err != nil {
+		return err
+	}
+	if _, err := bc.Do("SETCHAN", "getlivechan", "WITHIN", "fleet", "FENCE",
+		"DETECT", "inside,outside", "GET", "zones", "zone1", "LIVE"); err != nil {
+		return err
+	}
+
+	// Wait for the subscriber to be ready.
+	for !ready.Load() {
+		if _, err := bc.Do("PUBLISH", "status", "ready"); err != nil {
+			return err
+		}
+	}
+
+	// truck inside A -> inside
+	if _, err := bc.Do("SET", "fleet", "truck1", "POINT", "33.5", "-112.1"); err != nil {
+		return err
+	}
+	// move boundary to B (watched key is "fleet", so no message from this write)
+	if _, err := bc.Do("SET", "zones", "zone1", "OBJECT", fenceGetLivePolyB); err != nil {
+		return err
+	}
+	// truck inside B -> inside (runtime resolution)
+	if _, err := bc.Do("SET", "fleet", "truck1", "POINT", "33.5", "-110.1"); err != nil {
+		return err
+	}
+	// truck back at old location -> outside (boundary followed to B)
+	if _, err := bc.Do("SET", "fleet", "truck1", "POINT", "33.5", "-112.1"); err != nil {
+		return err
+	}
+
+	return <-finalErr
 }
 
 type fenceReader struct {
