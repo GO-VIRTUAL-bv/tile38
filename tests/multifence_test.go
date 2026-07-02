@@ -16,6 +16,7 @@ func subTestMultiFence(g *testGroup) {
 	g.regSubTest("grid quadkey", multifence_grid_quadkey_test)
 	g.regSubTest("grid tile", multifence_grid_tile_test)
 	g.regSubTest("grid geohash", multifence_grid_geohash_test)
+	g.regSubTest("grid a5", multifence_grid_a5_test)
 	g.regSubTest("grid detect inside", multifence_grid_inside_test)
 	g.regSubTest("grid polygon coverage", multifence_grid_polygon_test)
 
@@ -186,6 +187,36 @@ func multifence_grid_inside_test(mc *mockServer) error {
 	return nil
 }
 
+func multifence_grid_a5_test(mc *mockServer) error {
+	rd, c, conn, err := openLiveFence(mc,
+		"WITHIN fleet FENCE DETECT enter,exit GRID A5 8")
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	defer c.Close()
+
+	if _, err := redis.String(c.Do("SET", "fleet", "truck1", "POINT", 33.5, -112.0)); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("detect", "enter",
+		"fence.type", "grid",
+		"fence.system", "a5",
+		"fence.id", "19a4080000000000"); err != nil {
+		return err
+	}
+	if _, err := redis.String(c.Do("SET", "fleet", "truck1", "POINT", 40.0, -74.0)); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("detect", "exit", "fence.id", "19a4080000000000"); err != nil {
+		return err
+	}
+	if err := rd.receiveExpect("detect", "enter", "fence.id", "2611380000000000"); err != nil {
+		return err
+	}
+	return nil
+}
+
 // multifence_grid_polygon_test verifies that a polygon spanning multiple grid
 // cells fires per covered cell (not just the centroid cell).
 func multifence_grid_polygon_test(mc *mockServer) error {
@@ -317,6 +348,7 @@ func multifence_validation_test(mc *mockServer) error {
 		{"SETCHAN", "c2", "WITHIN", "fleet", "FENCE", "GRID", "GEOHASH", "13"}, {"ERR invalid argument '13'"},
 		{"SETCHAN", "c3", "WITHIN", "fleet", "FENCE", "GRID", "TILE", "24"}, {"ERR invalid argument '24'"},
 		{"SETCHAN", "c4", "WITHIN", "fleet", "FENCE", "GRID", "FOO", "5"}, {"ERR invalid argument 'foo'"},
+		{"SETCHAN", "c5", "WITHIN", "fleet", "FENCE", "GRID", "A5", "31"}, {"ERR invalid argument '31'"},
 		{"WITHIN", "fleet", "GRID", "QUADKEY", "12"}, {"ERR grid is only supported with fence"},
 	})
 }

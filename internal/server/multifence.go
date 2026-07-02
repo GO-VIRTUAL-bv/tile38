@@ -69,6 +69,11 @@ func newGridSystem(system string, level int) (gridSystem, error) {
 			return nil, errInvalidArgument(strconv.Itoa(level))
 		}
 		return &geohashGrid{p: level}, nil
+	case "a5":
+		if !a5ValidResolution(level) {
+			return nil, errInvalidArgument(strconv.Itoa(level))
+		}
+		return &a5Grid{res: level}, nil
 	default:
 		return nil, errInvalidArgument(system)
 	}
@@ -187,8 +192,18 @@ func resolveCells(s *Server, fence *liveFenceSwitches, o *object.Object) []cell 
 	}
 	switch fence.multi.kind {
 	case "grid":
+		rect := o.Rect()
+		covering := fence.multi.grid.cellsCovering(rect)
+		// For a point the grid encoder's assignment is definitive; re-testing it
+		// against the cell's planar polygon would be wrong for systems whose
+		// cell boundaries are curved (e.g. A5 pentagons), where a point can fall
+		// just outside its own cell's projected polygon. Only area objects need
+		// the within/intersects predicate.
+		if rect.Min == rect.Max {
+			return covering
+		}
 		var cells []cell
-		for _, c := range fence.multi.grid.cellsCovering(o.Rect()) {
+		for _, c := range covering {
 			var hit bool
 			if fence.cmd == "within" {
 				hit = g.Within(c.obj)
