@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	a5 "github.com/a5geo/a5-go"
 	"github.com/mmcloughlin/geohash"
 	"github.com/tidwall/geojson"
 	"github.com/tidwall/geojson/geometry"
@@ -144,6 +145,17 @@ func (s *Server) cmdGET(msg *Message) (resp.Value, error) {
 			if err != nil || precision < 1 || precision > 12 {
 				return retrerr(errInvalidArgument(args[i]))
 			}
+		case "a5":
+			kind = "a5"
+			i++
+			if i == len(args) {
+				return retrerr(errInvalidNumberOfArguments)
+			}
+			var err error
+			precision, err = strconv.ParseInt(args[i], 10, 64)
+			if err != nil || !a5ValidResolution(int(precision)) {
+				return retrerr(errInvalidArgument(args[i]))
+			}
 		default:
 			return retrerr(errInvalidNumberOfArguments)
 		}
@@ -213,6 +225,17 @@ func buildObjectResponse(msg *Message, o *object.Object, start time.Time, kind s
 		}
 		center := o.Geo().Center()
 		p := geohash.EncodeWithPrecision(center.Y, center.X, uint(precision))
+		if msg.OutputType == JSON {
+			buf.WriteString(`"` + p + `"`)
+		} else {
+			vals = append(vals, resp.StringValue(p))
+		}
+	case "a5":
+		if msg.OutputType == JSON {
+			buf.WriteString(`,"a5":`)
+		}
+		center := o.Geo().Center()
+		p, _ := a5EncodePoint(center.X, center.Y, int(precision))
 		if msg.OutputType == JSON {
 			buf.WriteString(`"` + p + `"`)
 		} else {
@@ -717,6 +740,18 @@ func (s *Server) cmdSET(msg *Message) (resp.Value, commandDetails, error) {
 						return retwerr(errInvalidArgument(args[j]))
 					}
 					i += 2
+				case "a5":
+					kind = "a5"
+					j++
+					if j == len(args) {
+						return retwerr(errInvalidNumberOfArguments)
+					}
+					var err error
+					precision, err = strconv.ParseInt(args[j], 10, 64)
+					if err != nil || !a5ValidResolution(int(precision)) {
+						return retwerr(errInvalidArgument(args[j]))
+					}
+					i += 2
 				}
 			}
 		case "string":
@@ -782,6 +817,18 @@ func (s *Server) cmdSET(msg *Message) (resp.Value, commandDetails, error) {
 			i += 1
 			lat, lon := geohash.Decode(shash)
 			oobj = geojson.NewPoint(geometry.Point{X: lon, Y: lat})
+		case "a5":
+			if i+1 >= len(args) {
+				return retwerr(errInvalidNumberOfArguments)
+			}
+			scell := args[i+1]
+			i += 1
+			cellID, err := a5DecodeCell(scell)
+			if err != nil {
+				return retwerr(errInvalidArgument(scell))
+			}
+			ll := a5.CellToLonLat(cellID)
+			oobj = geojson.NewPoint(geometry.Point{X: ll[0], Y: ll[1]})
 		case "object":
 			if i+1 >= len(args) {
 				return retwerr(errInvalidNumberOfArguments)
@@ -940,6 +987,18 @@ func (s *Server) cmdFSET(msg *Message) (resp.Value, commandDetails, error) {
 					var err error
 					precision, err = strconv.ParseInt(args[j], 10, 64)
 					if err != nil || precision < 1 || precision > 12 {
+						return retwerr(errInvalidArgument(args[j]))
+					}
+					i += 2
+				case "a5":
+					kind = "a5"
+					j++
+					if j == len(args) {
+						return retwerr(errInvalidNumberOfArguments)
+					}
+					var err error
+					precision, err = strconv.ParseInt(args[j], 10, 64)
+					if err != nil || !a5ValidResolution(int(precision)) {
 						return retwerr(errInvalidArgument(args[j]))
 					}
 					i += 2

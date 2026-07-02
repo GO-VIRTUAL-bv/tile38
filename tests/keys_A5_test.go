@@ -1,0 +1,49 @@
+package tests
+
+// A5 reference values (computed with github.com/a5geo/a5-go):
+//   point lon=13 lat=52  -> res 0:  1200000000000000
+//                           res 5:  63fe000000000000
+//                           res 10: 51575d8000000000
+//   cell 51575d8000000000 center re-encoded at res 10 -> 51575d8000000000
+//   point lon=0  lat=0   -> res 10: 4f05dc8000000000
+
+func keys_A5_test(mc *mockServer) error {
+	return mc.DoBatch(
+		// --- GET encoding (like HASH) ---
+		Do("SET", "mykey", "p", "POINT", 52, 13).OK(),
+		Do("GET", "mykey", "p", "A5", "10").Str("51575d8000000000"),
+		Do("GET", "mykey", "p", "A5", "5").Str("63fe000000000000"),
+		Do("GET", "mykey", "p", "A5", "0").Str("1200000000000000"),
+		Do("GET", "mykey", "p", "A5", "10").JSON().Str(`{"ok":true,"a5":"51575d8000000000"}`),
+		// GET A5 argument validation
+		Do("GET", "mykey", "p", "a5").Err("wrong number of arguments for 'get' command"),
+		Do("GET", "mykey", "p", "a5", "-1").Err("invalid argument '-1'"),
+		Do("GET", "mykey", "p", "a5", "31").Err("invalid argument '31'"),
+		Do("GET", "mykey", "p", "a5", "nope").Err("invalid argument 'nope'"),
+
+		// --- SET encoding: decode a cell to its center point (like SET HASH) ---
+		Do("SET", "mykey", "q", "A5", "51575d8000000000").OK(),
+		// round-trip: the stored center re-encodes to the same cell
+		Do("GET", "mykey", "q", "A5", "10").Str("51575d8000000000"),
+		Do("SET", "mykey", "q", "A5").Err("wrong number of arguments for 'set' command"),
+		Do("SET", "mykey", "q", "A5", "xyz").Err("invalid argument 'xyz'"),
+
+		// --- Output format (like HASHES) ---
+		Do("SET", "outkey", "a", "POINT", 52, 13).OK(),
+		Do("SCAN", "outkey", "A5", "10").Str(`[0 [[a 51575d8000000000]]]`),
+		Do("SCAN", "outkey", "A5", "0").Str(`[0 [[a 1200000000000000]]]`),
+		Do("NEARBY", "outkey", "LIMIT", 10, "A5", "10", "POINT", 52, 13, 100000).
+			Str(`[0 [[a 51575d8000000000]]]`),
+		// output resolution validation
+		Do("SCAN", "outkey", "A5", "31").Err("invalid argument '31'"),
+		Do("SCAN", "outkey", "A5").Err("wrong number of arguments for 'scan' command"),
+
+		// --- Query area (like QUADKEY) ---
+		Do("SET", "areakey", "in", "POINT", 52, 13).OK(),
+		Do("SET", "areakey", "out", "POINT", 0, 0).OK(),
+		Do("INTERSECTS", "areakey", "IDS", "A5", "51575d8000000000").Str(`[0 [in]]`),
+		Do("WITHIN", "areakey", "IDS", "A5", "51575d8000000000").Str(`[0 [in]]`),
+		Do("INTERSECTS", "areakey", "IDS", "A5", "nothex").Err("invalid argument 'nothex'"),
+		Do("INTERSECTS", "areakey", "A5").Err("wrong number of arguments for 'intersects' command"),
+	)
+}

@@ -1,6 +1,6 @@
 module github.com/tidwall/tile38
 
-go 1.24.0
+go 1.25
 
 require (
 	github.com/tidwall/assert v0.1.0
@@ -26,6 +26,7 @@ require (
 	cloud.google.com/go/pubsub v1.50.0
 	github.com/Azure/azure-event-hubs-go/v3 v3.6.2
 	github.com/IBM/sarama v1.46.0
+	github.com/a5geo/a5-go v0.0.0-00010101000000-000000000000
 	github.com/aws/aws-sdk-go v1.55.8
 	github.com/cloudflare/cloudflare-go/v4 v4.6.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1
@@ -130,3 +131,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )
+
+replace github.com/a5geo/a5-go => github.com/corewood-tech/a5go v0.0.0-20260308205007-3948c65956e6
