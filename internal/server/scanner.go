@@ -32,6 +32,7 @@ const (
 	outputPoints
 	outputHashes
 	outputBounds
+	outputA5
 )
 
 type scanWriter struct {
@@ -90,7 +91,7 @@ func (s *Server) newScanWriter(
 	default:
 		return nil, errors.New("invalid output type")
 	case outputIDs, outputObjects, outputCount, outputBounds, outputPoints,
-		outputHashes:
+		outputHashes, outputA5:
 	}
 	if limit == 0 {
 		if output == outputCount {
@@ -451,6 +452,10 @@ func (sw *scanWriter) writeFilled(opts ScanWriterParams) {
 				center := opts.obj.Geo().Center()
 				p := geohash.EncodeWithPrecision(center.Y, center.X, uint(sw.precision))
 				wr.WriteString(`,"hash":"` + p + `"`)
+			case outputA5:
+				center := opts.obj.Geo().Center()
+				p, _ := a5EncodePoint(center.X, center.Y, int(sw.precision))
+				wr.WriteString(`,"a5":"` + p + `"`)
 			case outputBounds:
 				wr.WriteString(`,"bounds":` + string(appendJSONSimpleBounds(nil, opts.obj.Geo())))
 			}
@@ -494,6 +499,10 @@ func (sw *scanWriter) writeFilled(opts ScanWriterParams) {
 			case outputHashes:
 				center := opts.obj.Geo().Center()
 				p := geohash.EncodeWithPrecision(center.Y, center.X, uint(sw.precision))
+				vals = append(vals, resp.StringValue(p))
+			case outputA5:
+				center := opts.obj.Geo().Center()
+				p, _ := a5EncodePoint(center.X, center.Y, int(sw.precision))
 				vals = append(vals, resp.StringValue(p))
 			case outputBounds:
 				bbox := opts.obj.Rect()

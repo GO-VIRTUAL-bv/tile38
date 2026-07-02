@@ -377,6 +377,25 @@ func (s *Server) cmdSearchArgs(
 		if err != nil {
 			return
 		}
+	case "a5":
+		if lfs.clip {
+			err = errInvalidArgument("cannot clip with " + ltyp)
+			return
+		}
+		var scell string
+		if vs, scell, ok = tokenval(vs); !ok || scell == "" {
+			err = errInvalidNumberOfArguments
+			return
+		}
+		var cellID uint64
+		if cellID, err = a5DecodeCell(scell); err != nil {
+			err = errInvalidArgument(scell)
+			return
+		}
+		if lfs.obj, err = a5CellPolygon(cellID); err != nil {
+			err = errInvalidArgument(scell)
+			return
+		}
 	case "bounds", "hash", "tile", "mvt", "quadkey":
 		vs, lfs.obj, lfs.tileX, lfs.tileY, lfs.tileZ, err =
 			parseRectArea(ltyp, vs)
@@ -495,7 +514,7 @@ var nearbyTypes = map[string]bool{
 var withinOrIntersectsTypes = map[string]bool{
 	"geo": true, "bounds": true, "hash": true, "tile": true, "quadkey": true,
 	"get": true, "object": true, "circle": true, "point": true, "sector": true,
-	"mvt": true,
+	"mvt": true, "a5": true,
 }
 
 func (s *Server) cmdNearby(msg *Message) (res resp.Value, err error) {
